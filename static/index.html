@@ -1,0 +1,1741 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CordClone 2.0 — Мессенджер</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #2b2d31; }
+    ::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 3px; }
+    body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; user-select: none; }
+    .msg-text { user-select: text; }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(35, 165, 90, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 18px rgba(35, 165, 90, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(35, 165, 90, 0); }
+    }
+    .call-pulse { animation: pulse-ring 1.6s infinite; }
+    body.theme-oled { --bg-main: #000000; --bg-side: #0a0a0c; }
+    body.theme-cyber { filter: saturate(1.25) contrast(1.04); }
+  </style>
+</head>
+<body class="bg-[#313338] text-[#dbdee1] h-screen w-screen overflow-hidden flex">
+
+  <!-- ==================== 1. ЛЕВАЯ ПАНЕЛЬ СЕРВЕРОВ + КНОПКА ДРУЗЬЯ/ЛС ==================== -->
+  <aside class="w-[72px] bg-[#1e1f22] flex flex-col items-center py-3 gap-2 shrink-0 z-20">
+    <!-- Главная кнопка "Друзья и ЛС" -->
+    <button id="home-btn" onclick="switchToHomeView()" title="Друзья и Личные сообщения"
+      class="relative group w-12 h-12 rounded-[16px] bg-[#5865F2] text-white flex items-center justify-center text-2xl font-bold transition-all duration-200 shadow-md">
+      <span id="home-pill" class="absolute left-0 w-1 h-9 bg-white rounded-r transition-all"></span>
+      💬
+      <span id="friend-req-badge" class="hidden absolute -top-1 -right-1 bg-[#da373c] text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-[#1e1f22]">0</span>
+    </button>
+
+    <div class="w-8 h-[2px] bg-[#35363c] rounded my-0.5"></div>
+
+    <!-- Список серверов -->
+    <div id="servers-list" class="flex flex-col items-center gap-2 w-full overflow-y-auto"></div>
+
+    <!-- Кнопка создания сервера -->
+    <button onclick="openServerModal()" title="Создать сервер"
+      class="w-12 h-12 rounded-[24px] hover:rounded-[16px] bg-[#313338] hover:bg-[#23a55a] text-[#23a55a] hover:text-white flex items-center justify-center text-2xl font-bold transition-all duration-200">
+      +
+    </button>
+  </aside>
+
+  <!-- ==================== 2. ВТОРАЯ КОЛОНКА (КАНАЛЫ ИЛИ СПИСОК ЛС) ==================== -->
+  <aside class="w-60 bg-[#2b2d31] flex flex-col shrink-0">
+    <!-- Шапка для Сервера -->
+    <div id="server-header" class="h-12 px-4 border-b border-[#1f2023] flex items-center justify-between shadow-sm">
+      <h1 id="current-server-name" class="font-bold text-white truncate">Сервер</h1>
+      <button onclick="openChannelModal()" title="Создать канал"
+        class="text-[#b5bac1] hover:text-white text-xl font-bold px-1.5 rounded hover:bg-[#35373c]">
+        +
+      </button>
+    </div>
+
+    <!-- Шапка для режима ЛС -->
+    <div id="dm-header" class="hidden h-12 px-3 border-b border-[#1f2023] flex items-center">
+      <button onclick="showFriendsPanel()" class="w-full bg-[#1e1f22] hover:bg-[#35373c] text-[#949ba4] hover:text-white text-xs font-semibold py-1.5 px-3 rounded flex items-center gap-2 transition">
+        <span>👥</span> Друзья и Заявки
+      </button>
+    </div>
+
+    <!-- Контейнер каналов сервера -->
+    <div id="channels-container" class="flex-1 overflow-y-auto p-2 space-y-4"></div>
+
+    <!-- Контейнер списка Личных Сообщений (ЛС) -->
+    <div id="dm-list-container" class="hidden flex-1 overflow-y-auto p-2 space-y-1"></div>
+
+    <!-- Индикатор Push-To-Talk (Рация) -->
+    <div id="ptt-banner" class="hidden bg-[#1e1f22] px-3 py-1.5 text-[11px] text-[#f0b232] border-t border-[#2b2d31] flex items-center justify-between">
+      <span>📻 Рация: зажми <b id="ptt-key-label" class="text-white">KeyV</b></span>
+      <span id="ptt-active-dot" class="w-2.5 h-2.5 rounded-full bg-[#80848e]"></span>
+    </div>
+
+    <!-- Плашка активного голосового / видео подключения -->
+    <div id="voice-status-bar" class="hidden bg-[#111214] border-t border-[#1f2023] px-3 py-2.5 space-y-2">
+      <div class="flex items-center justify-between">
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5 text-[#23a55a] text-xs font-bold">
+            <span class="w-2 h-2 rounded-full bg-[#23a55a] animate-pulse"></span>
+            Голосовая связь
+          </div>
+          <div id="voice-channel-label" class="text-[11px] text-[#949ba4] truncate">Канал</div>
+        </div>
+        <button onclick="leaveVoice()" title="Отключиться"
+          class="px-2 py-1 rounded bg-[#da373c] hover:bg-[#a1282c] text-white text-xs font-bold transition">
+          Выйти
+        </button>
+      </div>
+      <!-- Кнопки Камеры и Демонстрации экрана -->
+      <div class="grid grid-cols-2 gap-1.5">
+        <button id="cam-btn" onclick="toggleWebcam()"
+          class="bg-[#2b2d31] hover:bg-[#35373c] text-[#dbdee1] text-xs py-1.5 rounded font-medium flex items-center justify-center gap-1 transition">
+          🎥 Камера
+        </button>
+        <button id="screen-btn" onclick="toggleScreenShare()"
+          class="bg-[#2b2d31] hover:bg-[#35373c] text-[#dbdee1] text-xs py-1.5 rounded font-medium flex items-center justify-center gap-1 transition">
+          🖥️ Экран
+        </button>
+      </div>
+    </div>
+
+    <!-- Нижняя панель профиля пользователя -->
+    <div class="h-[54px] bg-[#232428] px-2 flex items-center justify-between">
+      <div onclick="openSettingsModal()" class="flex items-center gap-2 p-1 rounded hover:bg-[#35373c] cursor-pointer flex-1 min-w-0">
+        <div class="relative shrink-0">
+          <div id="my-avatar" class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm">
+            U
+          </div>
+          <span id="my-status-dot" class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#23a55a] ring-2 ring-[#232428]"></span>
+        </div>
+        <div class="leading-tight truncate">
+          <div id="my-username" class="text-xs font-bold text-white truncate">User</div>
+          <div id="my-custom-status" class="text-[10px] text-[#949ba4] truncate">В сети</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-0.5">
+        <button id="mute-btn" onclick="toggleMute()" title="Вкл/Выкл Микрофон"
+          class="p-1.5 rounded hover:bg-[#35373c] text-[#b5bac1] hover:text-white text-sm">
+          🎙️
+        </button>
+        <button id="deafen-btn" onclick="toggleDeafen()" title="Вкл/Выкл Звук (Deafen)"
+          class="p-1.5 rounded hover:bg-[#35373c] text-[#b5bac1] hover:text-white text-sm">
+          🎧
+        </button>
+        <button onclick="openSettingsModal()" title="Настройки"
+          class="p-1.5 rounded hover:bg-[#35373c] text-[#b5bac1] hover:text-white text-sm">
+          ⚙️
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ==================== 3. ЦЕНТРАЛЬНАЯ ОБЛАСТЬ (ЧАТ ИЛИ ПАНЕЛЬ ДРУЗЕЙ) ==================== -->
+  <main class="flex-1 flex flex-col bg-[#313338] min-w-0 relative">
+
+    <!-- ВЕРХНЯЯ ПАНЕЛЬ ЧАТА -->
+    <header id="chat-header" class="h-12 px-4 border-b border-[#26272d] flex items-center justify-between shadow-sm shrink-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <span id="chat-header-icon" class="text-[#80848e] text-xl font-bold">#</span>
+        <span id="current-channel-name" class="font-bold text-white truncate">выберите-канал</span>
+        <span id="dm-partner-status" class="hidden text-xs text-[#949ba4] ml-2 truncate"></span>
+      </div>
+      <!-- Кнопки звонка в ЛС -->
+      <div id="dm-call-actions" class="hidden flex items-center gap-2">
+        <button onclick="startDirectCall(false)" title="Голосовой звонок другу"
+          class="bg-[#23a55a] hover:bg-[#1a7f44] text-white text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition">
+          📞 Позвонить
+        </button>
+        <button onclick="startDirectCall(true)" title="Видеозвонок другу"
+          class="bg-[#5865F2] hover:bg-[#4752c4] text-white text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition">
+          🎥 Видеозвонок
+        </button>
+      </div>
+    </header>
+
+    <!-- БЛОК ВИДЕО-СТРИМОВ И ЭКРАНОВ (Появляется в звонке или при стриме) -->
+    <div id="video-stage" class="hidden bg-[#111214] border-b border-[#1f2023] p-3">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-bold uppercase tracking-wider text-[#949ba4]">🎬 Стримы и Видеокамеры (кликни на видео для полного экрана)</span>
+        <button onclick="document.getElementById('video-stage').classList.add('hidden')" class="text-xs text-[#949ba4] hover:text-white">Свернуть</button>
+      </div>
+      <div id="video-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto"></div>
+    </div>
+
+    <!-- ОБЛАСТЬ ЧАТА -->
+    <div id="chat-view" class="flex-1 flex flex-col min-h-0">
+      <div id="messages-list" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+
+      <!-- Плашка ответа на сообщение (Reply) -->
+      <div id="reply-banner" class="hidden mx-4 px-3 py-1.5 bg-[#2b2d31] rounded-t-lg border-b border-[#1f2023] flex items-center justify-between text-xs">
+        <div class="truncate text-[#b5bac1]">
+          Ответ для <b id="reply-target-user" class="text-white"></b>: <span id="reply-target-text" class="italic"></span>
+        </div>
+        <button onclick="cancelReply()" class="text-[#949ba4] hover:text-white font-bold ml-2">✕</button>
+      </div>
+
+      <!-- Плашка прикрепленной картинки -->
+      <div id="attachment-banner" class="hidden mx-4 px-3 py-2 bg-[#2b2d31] rounded-t-lg flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <img id="attachment-preview" src="" class="h-12 w-12 object-cover rounded border border-[#404249]" />
+          <span class="text-xs text-[#dbdee1]">Изображение готово к отправке</span>
+        </div>
+        <button onclick="clearAttachment()" class="text-[#da373c] hover:underline text-xs font-bold">Удалить</button>
+      </div>
+
+      <!-- Индикатор "печатает..." -->
+      <div id="typing-indicator" class="h-5 px-4 text-xs text-[#949ba4] italic"></div>
+
+      <!-- Форма отправки сообщения -->
+      <div class="px-4 pb-4 pt-1">
+        <form id="chat-form" class="bg-[#383a40] rounded-lg px-3 py-2 flex items-center gap-2.5">
+          <!-- Кнопка загрузки картинки -->
+          <label class="cursor-pointer w-7 h-7 rounded-full bg-[#4e5058] hover:bg-[#6d6f78] text-white flex items-center justify-center font-bold text-sm shrink-0 transition" title="Прикрепить картинку">
+            +
+            <input id="file-input" type="file" accept="image/*" class="hidden" onchange="handleFileSelect(event)" />
+          </label>
+          <input id="message-input" type="text" autocomplete="off"
+            placeholder="Написать сообщение... (поддерживается **жирный**, *курсив*, `код`)"
+            class="w-full bg-transparent text-[#dbdee1] placeholder-[#6d6f78] focus:outline-none text-sm" />
+          <button type="submit"
+            class="bg-[#5865F2] hover:bg-[#4752c4] text-white text-xs font-semibold px-3.5 py-1.5 rounded transition shrink-0">
+            Отправить
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ПАНЕЛЬ ДРУЗЕЙ (Открывается при нажатии на кнопку Discord / Друзья) -->
+    <div id="friends-view" class="hidden flex-1 flex flex-col bg-[#313338] min-h-0">
+      <div class="h-12 px-4 border-b border-[#26272d] flex items-center gap-4 text-sm font-semibold">
+        <span class="text-white font-bold flex items-center gap-2">👥 Друзья</span>
+        <div class="h-4 w-[1px] bg-[#3f4147]"></div>
+        <button onclick="setFriendsTab('online')" id="ftab-online" class="px-2.5 py-1 rounded bg-[#404249] text-white">В сети</button>
+        <button onclick="setFriendsTab('all')" id="ftab-all" class="px-2.5 py-1 rounded text-[#b5bac1] hover:bg-[#35373c]">Все</button>
+        <button onclick="setFriendsTab('pending')" id="ftab-pending" class="px-2.5 py-1 rounded text-[#b5bac1] hover:bg-[#35373c]">Ожидание</button>
+        <button onclick="setFriendsTab('add')" id="ftab-add" class="px-2.5 py-1 rounded bg-[#248046] text-white">Добавить в друзья</button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-6">
+        <!-- Блок добавления в друзья -->
+        <div id="friends-add-box" class="hidden max-w-xl space-y-3 mb-6">
+          <h3 class="text-white font-bold uppercase text-sm">Добавить в друзья</h3>
+          <p class="text-xs text-[#b5bac1]">Ты можешь добавить друга по его никнейму или уникальному ID. Твой ID: <code id="my-id-badge" class="bg-[#1e1f22] px-1.5 py-0.5 rounded text-white select-all"></code></p>
+          <div class="flex gap-2 bg-[#1e1f22] p-2 rounded-lg border border-[#111214]">
+            <input id="friend-search-input" type="text" placeholder="Введи никнейм или ID друга..."
+              class="flex-1 bg-transparent text-white text-sm px-2 focus:outline-none" />
+            <button onclick="sendFriendRequest()"
+              class="bg-[#5865F2] hover:bg-[#4752c4] text-white text-xs font-semibold px-4 py-2 rounded transition">
+              Отправить запрос дружбы
+            </button>
+          </div>
+          <div id="friend-req-feedback" class="text-xs font-medium"></div>
+        </div>
+
+        <!-- Список друзей или заявок -->
+        <div id="friends-list-box" class="space-y-2 max-w-2xl"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ==================== 4. ПРАВАЯ КОЛОНКА УЧАСТНИКОВ ==================== -->
+  <aside class="w-60 bg-[#2b2d31] border-l border-[#1f2023] p-3 hidden md:flex flex-col shrink-0">
+    <h3 id="online-count" class="text-xs font-bold text-[#949ba4] uppercase tracking-wider px-2 mb-2">
+      Участники — 0
+    </h3>
+    <div id="online-users-list" class="flex-1 overflow-y-auto space-y-1"></div>
+  </aside>
+
+  <!-- Невидимый контейнер для аудио-потоков WebRTC -->
+  <div id="remote-audios" class="hidden"></div>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО: ВХОДЯЩИЙ ЗВОНОК ==================== -->
+  <div id="incoming-call-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+    <div class="bg-[#1e1f22] border border-[#2b2d31] w-80 rounded-2xl p-6 text-center shadow-2xl space-y-4">
+      <div id="caller-avatar" class="w-20 h-20 rounded-full mx-auto flex items-center justify-center text-white text-3xl font-bold call-pulse">
+        U
+      </div>
+      <div>
+        <h3 id="caller-name" class="text-lg font-bold text-white">Друг</h3>
+        <p id="caller-type-text" class="text-xs text-[#949ba4]">Входящий звонок...</p>
+      </div>
+      <div class="flex justify-center gap-4 pt-2">
+        <button onclick="respondToCall(true)"
+          class="bg-[#23a55a] hover:bg-[#1a7f44] text-white px-5 py-2.5 rounded-full font-bold text-sm flex items-center gap-1.5 shadow-lg transition">
+          ✅ Принять
+        </button>
+        <button onclick="respondToCall(false)"
+          class="bg-[#da373c] hover:bg-[#a1282c] text-white px-5 py-2.5 rounded-full font-bold text-sm flex items-center gap-1.5 shadow-lg transition">
+          ❌ Сбросить
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО: МИНИ-ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ ==================== -->
+  <div id="user-popover-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick="if(event.target===this)closeModals()">
+    <div class="bg-[#111214] w-80 rounded-xl overflow-hidden shadow-2xl border border-[#2b2d31]">
+      <div id="popover-banner" class="h-16 bg-[#5865F2]"></div>
+      <div class="px-4 pb-4 -mt-8">
+        <div id="popover-avatar" class="w-16 h-16 rounded-full border-4 border-[#111214] flex items-center justify-center text-white text-2xl font-bold">
+          U
+        </div>
+        <div class="mt-2">
+          <h3 id="popover-username" class="text-lg font-bold text-white">Username</h3>
+          <p id="popover-userid" class="text-[11px] text-[#949ba4] select-all"></p>
+          <p id="popover-custom" class="text-xs text-[#dbdee1] mt-1"></p>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-4">
+          <button id="popover-dm-btn" class="bg-[#5865F2] hover:bg-[#4752c4] text-white text-xs font-semibold py-2 rounded transition">
+            💬 Написать в ЛС
+          </button>
+          <button id="popover-friend-btn" class="bg-[#23a55a] hover:bg-[#1a7f44] text-white text-xs font-semibold py-2 rounded transition">
+            ➕ В друзья
+          </button>
+        </div>
+        <button id="popover-call-btn" class="w-full mt-2 bg-[#2b2d31] hover:bg-[#35373c] text-white text-xs font-semibold py-2 rounded transition">
+          📞 Позвонить в ЛС
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ПОЛНОЦЕННЫЕ НАСТРОЙКИ (ВКЛАДКИ DISCORD) ==================== -->
+  <div id="settings-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+    <div class="bg-[#313338] w-[760px] max-w-[95vw] h-[540px] rounded-xl overflow-hidden shadow-2xl flex border border-[#1e1f22]">
+      <!-- Левое меню вкладок -->
+      <div class="w-52 bg-[#2b2d31] p-4 flex flex-col justify-between shrink-0">
+        <div class="space-y-1">
+          <div class="text-[11px] font-bold uppercase text-[#949ba4] px-2 mb-2">Настройки пользователя</div>
+          <button onclick="switchSettingsTab('account')" id="stab-account" class="w-full text-left px-3 py-1.5 rounded text-sm font-medium bg-[#404249] text-white">👤 Мой аккаунт</button>
+          <button onclick="switchSettingsTab('voice')" id="stab-voice" class="w-full text-left px-3 py-1.5 rounded text-sm font-medium text-[#b5bac1] hover:bg-[#35373c]">🎙️ Голос и Видео</button>
+          <button onclick="switchSettingsTab('appearance')" id="stab-appearance" class="w-full text-left px-3 py-1.5 rounded text-sm font-medium text-[#b5bac1] hover:bg-[#35373c]">🎨 Внешний вид</button>
+          <button onclick="switchSettingsTab('hotkeys')" id="stab-hotkeys" class="w-full text-left px-3 py-1.5 rounded text-sm font-medium text-[#b5bac1] hover:bg-[#35373c]">⌨️ Горячие клавиши</button>
+        </div>
+        <button onclick="closeModals()" class="w-full bg-[#da373c] hover:bg-[#a1282c] text-white text-xs font-bold py-2 rounded transition">
+          Закрыть (ESC)
+        </button>
+      </div>
+
+      <!-- Контент вкладок -->
+      <div class="flex-1 p-6 overflow-y-auto space-y-5">
+        <!-- ВКЛАДКА 1: МОЙ АККАУНТ -->
+        <div id="scontent-account" class="space-y-4">
+          <h2 class="text-lg font-bold text-white">Мой аккаунт</h2>
+          <div class="bg-[#1e1f22] p-3 rounded-lg text-xs text-[#949ba4]">
+            Твой уникальный ID для друзей: <b id="settings-my-id" class="text-white select-all"></b>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold uppercase text-[#b5bac1]">Никнейм</label>
+              <input id="profile-username" type="text" class="w-full mt-1 bg-[#1e1f22] text-white px-3 py-2 rounded text-sm focus:outline-none" />
+            </div>
+            <div>
+              <label class="text-xs font-bold uppercase text-[#b5bac1]">Цвет аватарки</label>
+              <input id="profile-color" type="color" class="w-full mt-1 h-9 bg-[#1e1f22] rounded cursor-pointer" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold uppercase text-[#b5bac1]">Статус</label>
+              <select id="profile-status" class="w-full mt-1 bg-[#1e1f22] text-white px-3 py-2 rounded text-sm focus:outline-none">
+                <option value="online">🟢 В сети</option>
+                <option value="idle">🌙 Не активен</option>
+                <option value="dnd">⛔ Не беспокоить</option>
+                <option value="invisible">⚪ Невидимка</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-bold uppercase text-[#b5bac1]">Кастомный статус (Игра / Дела)</label>
+              <input id="profile-custom-status" type="text" placeholder="Играю в PUBG Mobile..." class="w-full mt-1 bg-[#1e1f22] text-white px-3 py-2 rounded text-sm focus:outline-none" />
+            </div>
+          </div>
+          <button onclick="saveProfile()" class="bg-[#23a55a] hover:bg-[#1a7f44] text-white px-5 py-2 rounded text-sm font-bold transition">
+            Сохранить профиль
+          </button>
+        </div>
+
+        <!-- ВКЛАДКА 2: ГОЛОС И ВИДЕО (PUSH TO TALK) -->
+        <div id="scontent-voice" class="hidden space-y-4">
+          <h2 class="text-lg font-bold text-white">Настройки Голоса и Видео</h2>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold uppercase text-[#b5bac1]">Устройство ввода (Микрофон)</label>
+              <select id="audio-input-select" class="w-full mt-1 bg-[#1e1f22] text-white px-2 py-2 rounded text-xs"></select>
+            </div>
+            <div>
+              <label class="text-xs font-bold uppercase text-[#b5bac1]">Громкость собеседников</label>
+              <input id="remote-volume-slider" type="range" min="0" max="100" value="100" oninput="updateRemoteVolume(this.value)" class="w-full mt-3 accent-[#5865F2]" />
+            </div>
+          </div>
+
+          <div class="space-y-2 pt-2">
+            <label class="text-xs font-bold uppercase text-[#b5bac1]">Режим активации микрофона</label>
+            <div class="grid grid-cols-2 gap-3">
+              <label onclick="setVoiceMode('vad')" id="vmode-vad" class="cursor-pointer p-3 rounded-lg border-2 border-[#5865F2] bg-[#1e1f22]">
+                <div class="font-bold text-white text-sm">🎙️ По голосу (Voice Activity)</div>
+                <div class="text-[11px] text-[#949ba4]">Микрофон передаёт речь автоматически</div>
+              </label>
+              <label onclick="setVoiceMode('ptt')" id="vmode-ptt" class="cursor-pointer p-3 rounded-lg border-2 border-transparent bg-[#1e1f22]">
+                <div class="font-bold text-white text-sm">📻 Режим рации (Push-to-Talk)</div>
+                <div class="text-[11px] text-[#949ba4]">Микрофон работает только пока зажата клавиша</div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Настройка клавиши Push-to-Talk -->
+          <div id="ptt-config-box" class="bg-[#1e1f22] p-3.5 rounded-lg flex items-center justify-between">
+            <div>
+              <div class="text-sm font-bold text-white">Клавиша активации рации (Push-to-Talk)</div>
+              <div class="text-xs text-[#949ba4]">Нажми на кнопку справа и выбери любую клавишу</div>
+            </div>
+            <button id="ptt-bind-btn" onclick="startBindingPTT()" class="bg-[#5865F2] hover:bg-[#4752c4] text-white font-mono text-xs font-bold px-4 py-2 rounded">
+              KeyV
+            </button>
+          </div>
+
+          <!-- Индикатор проверки микрофона -->
+          <div class="space-y-1">
+            <div class="flex justify-between text-xs text-[#b5bac1]">
+              <span>Проверка уровня микрофона</span>
+              <button onclick="testMicLevel()" class="text-[#5865F2] hover:underline font-semibold">Проверить микрофон</button>
+            </div>
+            <div class="w-full h-3 bg-[#1e1f22] rounded-full overflow-hidden">
+              <div id="mic-level-bar" class="h-full bg-[#23a55a] w-0 transition-all duration-75"></div>
+            </div>
+          </div>
+
+          <!-- Шумоподавление -->
+          <label class="flex items-center justify-between bg-[#1e1f22] p-3 rounded-lg cursor-pointer">
+            <div>
+              <div class="text-sm font-bold text-white">Подавление шума и эха</div>
+              <div class="text-xs text-[#949ba4]">Аппаратный фильтр WebRTC (Noise Suppression & Echo Cancellation)</div>
+            </div>
+            <input id="noise-suppression-toggle" type="checkbox" checked class="w-5 h-5 accent-[#23a55a]" />
+          </label>
+        </div>
+
+        <!-- ВКЛАДКА 3: ВНЕШНИЙ ВИД -->
+        <div id="scontent-appearance" class="hidden space-y-4">
+          <h2 class="text-lg font-bold text-white">Внешний вид</h2>
+          <div class="grid grid-cols-3 gap-3">
+            <button onclick="setTheme('default')" class="p-3 rounded-lg bg-[#1e1f22] border border-[#404249] text-left">
+              <div class="font-bold text-white text-sm">🌑 Тёмная (Discord)</div>
+              <div class="text-xs text-[#949ba4]">Классическая палитра</div>
+            </button>
+            <button onclick="setTheme('oled')" class="p-3 rounded-lg bg-black border border-[#404249] text-left">
+              <div class="font-bold text-white text-sm">🖤 Чёрная OLED</div>
+              <div class="text-xs text-[#949ba4]">Глубокий контраст</div>
+            </button>
+            <button onclick="setTheme('cyber')" class="p-3 rounded-lg bg-[#1a103c] border border-[#5865F2] text-left">
+              <div class="font-bold text-white text-sm">⚡ Неон / Кибер</div>
+              <div class="text-xs text-[#949ba4]">Насыщенные цвета</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- ВКЛАДКА 4: ГОРЯЧИЕ КЛАВИШИ -->
+        <div id="scontent-hotkeys" class="hidden space-y-3">
+          <h2 class="text-lg font-bold text-white">Горячие клавиши</h2>
+          <div class="bg-[#1e1f22] p-3 rounded flex justify-between text-xs">
+            <span>Активация рации (Push-to-Talk)</span>
+            <kbd id="hotkey-ptt-display" class="bg-[#313338] px-2 py-0.5 rounded text-white font-mono">KeyV</kbd>
+          </div>
+          <div class="bg-[#1e1f22] p-3 rounded flex justify-between text-xs">
+            <span>Включить / Выключить микрофон (Mute)</span>
+            <kbd class="bg-[#313338] px-2 py-0.5 rounded text-white font-mono">Alt + M</kbd>
+          </div>
+          <div class="bg-[#1e1f22] p-3 rounded flex justify-between text-xs">
+            <span>Закрыть любое модальное окно</span>
+            <kbd class="bg-[#313338] px-2 py-0.5 rounded text-white font-mono">ESC</kbd>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛЬНОЕ ОКНО: СОЗДАТЬ СЕРВЕР -->
+  <div id="server-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-[#313338] w-96 rounded-lg p-5 shadow-xl space-y-4">
+      <h2 class="text-lg font-bold text-white">Создать новый сервер</h2>
+      <input id="new-server-name" type="text" placeholder="Название сервера" class="w-full bg-[#1e1f22] text-white px-3 py-2 rounded focus:outline-none text-sm" />
+      <input id="new-server-icon" type="text" value="🔥" maxlength="2" class="w-full bg-[#1e1f22] text-white px-3 py-2 rounded focus:outline-none text-sm" />
+      <div class="flex justify-end gap-2">
+        <button onclick="closeModals()" class="px-4 py-1.5 text-sm text-[#b5bac1]">Отмена</button>
+        <button onclick="submitNewServer()" class="bg-[#5865F2] text-white px-4 py-1.5 rounded text-sm font-semibold">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛЬНОЕ ОКНО: СОЗДАТЬ КАНАЛ -->
+  <div id="channel-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-[#313338] w-96 rounded-lg p-5 shadow-xl space-y-4">
+      <h2 class="text-lg font-bold text-white">Создать канал</h2>
+      <select id="new-channel-type" class="w-full bg-[#1e1f22] text-white px-3 py-2 rounded text-sm">
+        <option value="text"># Текстовый канал</option>
+        <option value="voice">🔊 Голосовой канал</option>
+      </select>
+      <input id="new-channel-name" type="text" placeholder="Название канала" class="w-full bg-[#1e1f22] text-white px-3 py-2 rounded text-sm" />
+      <div class="flex justify-end gap-2">
+        <button onclick="closeModals()" class="px-4 py-1.5 text-sm text-[#b5bac1]">Отмена</button>
+        <button onclick="submitNewChannel()" class="bg-[#5865F2] text-white px-4 py-1.5 rounded text-sm font-semibold">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ПРОСМОТР КАРТИНКИ НА ВЕСЬ ЭКРАН -->
+  <div id="lightbox-modal" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50 cursor-zoom-out" onclick="this.classList.add('hidden')">
+    <img id="lightbox-img" src="" class="max-w-[92vw] max-h-[90vh] rounded-lg shadow-2xl" />
+  </div>
+
+  <script>
+    // ==================== СОСТОЯНИЕ И НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ====================
+    const COLORS = ["#5865F2", "#EB459E", "#ED4245", "#FEE75C", "#57F287", "#E67E22", "#9B59B6"];
+    let myUserId = localStorage.getItem("dc_userid");
+    if (!myUserId) {
+      myUserId = "u_" + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem("dc_userid", myUserId);
+    }
+    let myUsername = localStorage.getItem("dc_username") || ("Игрок_" + Math.floor(100 + Math.random() * 899));
+    let myColor = localStorage.getItem("dc_color") || COLORS[Math.floor(Math.random() * COLORS.length)];
+    let myStatus = localStorage.getItem("dc_status") || "online";
+    let myCustomStatus = localStorage.getItem("dc_custom_status") || "";
+
+    // Режим микрофона: 'vad' (по голосу) или 'ptt' (рация по кнопке)
+    let voiceMode = localStorage.getItem("dc_voice_mode") || "vad";
+    let pttKeyCode = localStorage.getItem("dc_ptt_key") || "KeyV";
+    let isBindingPTT = false;
+    let isPTTPressed = false;
+    let remoteVolume = 1.0;
+
+    let servers = [];
+    let channels = [];
+    let allUsers = [];
+    let friendsData = { friends: [], incoming: [], outgoing: [] };
+    let currentFriendsTab = "online";
+
+    let voiceRooms = {};
+    let viewMode = "server"; // 'server' или 'home'
+    let currentServerId = null;
+    let currentRoomKey = null; // 'ch_1' или 'dm_u1_u2'
+    let currentDMPartner = null;
+    let currentVoiceRoomId = null;
+
+    let replyToMessage = null;
+    let pendingAttachment = null;
+    let incomingCallData = null;
+    let ringtoneInterval = null;
+    let ws = null;
+    let typingTimeout = null;
+
+    // WebRTC медиа-потоки
+    let localAudioStream = null;
+    let localVideoStream = null;
+    let isMuted = false;
+    let isDeafened = false;
+    let isWebcamOn = false;
+    let isScreenOn = false;
+    const peerConnections = {};
+    const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+    // ==================== ЗВУКОВЫЕ ЭФФЕКТЫ (Web Audio API) ====================
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(freq = 440, duration = 0.12, type = "sine", vol = 0.12) {
+      if (isDeafened) return;
+      try {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    function sfxJoinVoice() { playTone(520, 0.09, "sine"); setTimeout(() => playTone(720, 0.14, "sine"), 90); }
+    function sfxLeaveVoice() { playTone(620, 0.09, "sine"); setTimeout(() => playTone(400, 0.15, "sine"), 90); }
+    function sfxPTTOn() { playTone(880, 0.05, "triangle", 0.08); }
+    function sfxPTTOff() { playTone(580, 0.05, "triangle", 0.06); }
+    function sfxMessage() { if (myStatus !== "dnd") playTone(660, 0.08, "sine", 0.08); }
+
+    function startRingtone() {
+      stopRingtone();
+      const ring = () => {
+        playTone(587, 0.18, "sine", 0.18);
+        setTimeout(() => playTone(880, 0.25, "sine", 0.18), 200);
+      };
+      ring();
+      ringtoneInterval = setInterval(ring, 1400);
+    }
+    function stopRingtone() {
+      if (ringtoneInterval) { clearInterval(ringtoneInterval); ringtoneInterval = null; }
+    }
+
+    // ==================== ИНИЦИАЛИЗАЦИЯ ====================
+    async function initApp() {
+      document.getElementById("my-id-badge").textContent = myUserId;
+      document.getElementById("settings-my-id").textContent = myUserId;
+      updateMyProfileUI();
+      applyVoiceModeUI();
+
+      const res = await fetch(`/api/init?user_id=${encodeURIComponent(myUserId)}&username=${encodeURIComponent(myUsername)}&color=${encodeURIComponent(myColor)}`);
+      const data = await res.json();
+      servers = data.servers;
+      channels = data.channels;
+      allUsers = data.users || [];
+      voiceRooms = data.voice_states || {};
+
+      await loadFriends();
+      if (servers.length > 0) selectServer(servers[0].id);
+      connectWebSocket();
+      populateAudioDevices();
+    }
+
+    function updateMyProfileUI() {
+      document.getElementById("my-username").textContent = myUsername;
+      const av = document.getElementById("my-avatar");
+      av.textContent = myUsername.charAt(0).toUpperCase();
+      av.style.backgroundColor = myColor;
+
+      const statusColors = { online: "#23a55a", idle: "#f0b232", dnd: "#f23f43", invisible: "#80848e" };
+      const statusNames = { online: "В сети", idle: "Не активен", dnd: "Не беспокоить", invisible: "Невидимка" };
+      document.getElementById("my-status-dot").style.backgroundColor = statusColors[myStatus] || "#23a55a";
+      document.getElementById("my-custom-status").textContent = myCustomStatus || statusNames[myStatus] || "В сети";
+    }
+
+    // ==================== WEBSOCKET ====================
+    function connectWebSocket() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const url = `${proto}//${location.host}/ws/${encodeURIComponent(myUserId)}?username=${encodeURIComponent(myUsername)}&color=${encodeURIComponent(myColor)}&status=${encodeURIComponent(myStatus)}&custom_status=${encodeURIComponent(myCustomStatus)}`;
+      ws = new WebSocket(url);
+
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "new_message") {
+          const msg = data.message;
+          if (msg.room_key === currentRoomKey) {
+            appendMessage(msg);
+          } else if (msg.room_key.startsWith("dm_") && msg.room_key.includes(myUserId)) {
+            sfxMessage();
+          }
+        } else if (data.type === "message_edited") {
+          const el = document.getElementById(`msg-content-${data.message_id}`);
+          if (el) el.innerHTML = renderMarkdown(data.content) + ` <span class="text-[10px] text-[#949ba4]">(изм.)</span>`;
+        } else if (data.type === "message_deleted") {
+          const row = document.getElementById(`msg-row-${data.message_id}`);
+          if (row) row.remove();
+        } else if (data.type === "message_reactions") {
+          renderReactionsForMsg(data.message_id, data.reactions);
+        } else if (data.type === "online_users") {
+          allUsers = data.users;
+          renderOnlineUsers(data.users);
+          renderDMList();
+        } else if (data.type === "friend_update") {
+          await loadFriends();
+        } else if (data.type === "typing") {
+          if (data.room_key === currentRoomKey && data.user_id !== myUserId) {
+            showTyping(data.username);
+          }
+        } else if (data.type === "server_created") {
+          servers.push(data.server);
+          channels.push(...data.channels);
+          renderServers();
+        } else if (data.type === "channel_created") {
+          channels.push(data.channel);
+          renderChannels();
+        } else if (data.type === "voice_state_update") {
+          voiceRooms = data.voice_rooms;
+          renderChannels();
+        } else if (data.type === "voice_peers") {
+          for (const peerId of data.peers) {
+            await createOffer(peerId);
+          }
+        } else if (data.type === "incoming_call") {
+          handleIncomingCall(data);
+        } else if (data.type === "call_responded") {
+          if (!data.accepted) {
+            alert("Собеседник отклонил звонок.");
+            leaveVoice();
+          }
+        } else if (data.type === "webrtc_offer") {
+          await handleOffer(data.sender_id, data.sdp);
+        } else if (data.type === "webrtc_answer") {
+          await handleAnswer(data.sender_id, data.sdp);
+        } else if (data.type === "webrtc_ice") {
+          await handleIce(data.sender_id, data.candidate);
+        } else if (data.type === "peer_left") {
+          closePeer(data.peer_id);
+        }
+      };
+
+      ws.onclose = () => setTimeout(connectWebSocket, 2000);
+    }
+
+    // ==================== ПЕРЕКЛЮЧЕНИЕ: СЕРВЕРЫ vs ДРУЗЬЯ/ЛС ====================
+    function switchToHomeView() {
+      viewMode = "home";
+      currentServerId = null;
+      document.getElementById("home-pill").className = "absolute left-0 w-1 h-9 bg-white rounded-r transition-all";
+      document.getElementById("server-header").classList.add("hidden");
+      document.getElementById("dm-header").classList.remove("hidden");
+      document.getElementById("channels-container").classList.add("hidden");
+      document.getElementById("dm-list-container").classList.remove("hidden");
+
+      renderServers();
+      renderDMList();
+      showFriendsPanel();
+    }
+
+    function showFriendsPanel() {
+      document.getElementById("chat-header").classList.add("hidden");
+      document.getElementById("chat-view").classList.add("hidden");
+      document.getElementById("friends-view").classList.remove("hidden");
+      renderFriendsList();
+    }
+
+    function selectServer(serverId) {
+      viewMode = "server";
+      currentServerId = serverId;
+      currentDMPartner = null;
+
+      document.getElementById("home-pill").className = "absolute left-0 w-1 h-0 group-hover:h-5 bg-white rounded-r transition-all";
+      document.getElementById("server-header").classList.remove("hidden");
+      document.getElementById("dm-header").classList.add("hidden");
+      document.getElementById("channels-container").classList.remove("hidden");
+      document.getElementById("dm-list-container").classList.add("hidden");
+      document.getElementById("friends-view").classList.add("hidden");
+      document.getElementById("chat-header").classList.remove("hidden");
+      document.getElementById("chat-view").classList.remove("hidden");
+      document.getElementById("dm-call-actions").classList.add("hidden");
+      document.getElementById("dm-partner-status").classList.add("hidden");
+
+      const srv = servers.find(s => s.id === serverId);
+      document.getElementById("current-server-name").textContent = srv ? srv.name : "Сервер";
+      renderServers();
+      renderChannels();
+
+      const firstText = channels.find(c => c.server_id === serverId && c.type === "text");
+      if (firstText) selectTextChannel(firstText.id, firstText.name);
+    }
+
+    function renderServers() {
+      const container = document.getElementById("servers-list");
+      container.innerHTML = "";
+      servers.forEach(srv => {
+        const active = (viewMode === "server" && srv.id === currentServerId);
+        const btn = document.createElement("button");
+        btn.className = `relative group w-12 h-12 flex items-center justify-center text-xl font-bold transition-all duration-200 ${
+          active ? "rounded-[16px] bg-[#5865F2] text-white" : "rounded-[24px] hover:rounded-[16px] bg-[#313338] hover:bg-[#5865F2] text-[#dbdee1] hover:text-white"
+        }`;
+        btn.title = srv.name;
+        btn.innerHTML = `
+          <span class="absolute left-0 w-1 bg-white rounded-r transition-all ${active ? "h-9" : "h-0 group-hover:h-5"}"></span>
+          <span>${srv.icon}</span>
+        `;
+        btn.onclick = () => selectServer(srv.id);
+        container.appendChild(btn);
+      });
+    }
+
+    function renderChannels() {
+      const container = document.getElementById("channels-container");
+      container.innerHTML = "";
+      const srvChannels = channels.filter(c => c.server_id === currentServerId);
+
+      const categories = {};
+      srvChannels.forEach(ch => {
+        if (!categories[ch.category]) categories[ch.category] = [];
+        categories[ch.category].push(ch);
+      });
+
+      for (const [catName, chList] of Object.entries(categories)) {
+        const catDiv = document.createElement("div");
+        catDiv.innerHTML = `<div class="text-[11px] font-bold text-[#949ba4] uppercase tracking-wider px-2 mb-1">${catName}</div>`;
+
+        chList.forEach(ch => {
+          const isText = ch.type === "text";
+          const roomKey = `ch_${ch.id}`;
+          const active = isText ? (currentRoomKey === roomKey) : (currentVoiceRoomId === roomKey);
+
+          const item = document.createElement("div");
+          item.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer mb-0.5 transition ${
+            active ? "bg-[#404249] text-white font-medium" : "text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]"
+          }`;
+          item.innerHTML = `<span class="text-base">${isText ? "#" : "🔊"}</span><span class="text-sm truncate">${ch.name}</span>`;
+          item.onclick = () => isText ? selectTextChannel(ch.id, ch.name) : joinVoiceRoom(roomKey, ch.name);
+          catDiv.appendChild(item);
+
+          // Участники в голосовом канале
+          if (!isText && voiceRooms[roomKey] && voiceRooms[roomKey].length > 0) {
+            const vList = document.createElement("div");
+            vList.className = "pl-6 py-1 space-y-1";
+            voiceRooms[roomKey].forEach(u => {
+              const uRow = document.createElement("div");
+              uRow.className = "flex items-center justify-between text-xs text-[#dbdee1] pr-2";
+              uRow.innerHTML = `
+                <div class="flex items-center gap-2 truncate">
+                  <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-[#23a55a]" style="background:${u.color}">
+                    ${u.username.charAt(0).toUpperCase()}
+                  </span>
+                  <span class="truncate">${escapeHtml(u.username)}</span>
+                </div>
+                <div class="flex items-center gap-1 text-[11px]">
+                  ${u.screen ? '<span class="bg-[#da373c] text-white px-1 rounded text-[9px] font-bold">LIVE</span>' : ''}
+                  ${u.video ? '🎥' : ''}
+                  ${u.deafened ? '🔇' : (u.muted ? '🎙️🚫' : '🎙️')}
+                </div>
+              `;
+              vList.appendChild(uRow);
+            });
+            catDiv.appendChild(vList);
+          }
+        });
+        container.appendChild(catDiv);
+      }
+    }
+
+    // ==================== СИСТЕМА ДРУЗЕЙ И ЛС ====================
+    async function loadFriends() {
+      const res = await fetch(`/api/friends/${encodeURIComponent(myUserId)}`);
+      friendsData = await res.json();
+
+      const badge = document.getElementById("friend-req-badge");
+      if (friendsData.incoming.length > 0) {
+        badge.textContent = friendsData.incoming.length;
+        badge.classList.remove("hidden");
+      } else {
+        badge.classList.add("hidden");
+      }
+
+      renderDMList();
+      if (!document.getElementById("friends-view").classList.contains("hidden")) {
+        renderFriendsList();
+      }
+    }
+
+    function setFriendsTab(tab) {
+      currentFriendsTab = tab;
+      ["online", "all", "pending", "add"].forEach(t => {
+        const btn = document.getElementById(`ftab-${t}`);
+        if (t === "add") return;
+        btn.className = (t === tab) ? "px-2.5 py-1 rounded bg-[#404249] text-white" : "px-2.5 py-1 rounded text-[#b5bac1] hover:bg-[#35373c]";
+      });
+      document.getElementById("friends-add-box").classList.toggle("hidden", tab !== "add");
+      renderFriendsList();
+    }
+
+    function renderFriendsList() {
+      const box = document.getElementById("friends-list-box");
+      box.innerHTML = "";
+
+      if (currentFriendsTab === "pending") {
+        if (friendsData.incoming.length === 0 && friendsData.outgoing.length === 0) {
+          box.innerHTML = `<div class="text-sm text-[#949ba4]">Нет активных заявок в друзья.</div>`;
+          return;
+        }
+        friendsData.incoming.forEach(req => {
+          const item = document.createElement("div");
+          item.className = "flex items-center justify-between bg-[#2b2d31] p-3 rounded-lg";
+          item.innerHTML = `
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background:${req.avatar_color}">${req.username.charAt(0).toUpperCase()}</div>
+              <div>
+                <div class="text-sm font-bold text-white">${escapeHtml(req.username)}</div>
+                <div class="text-xs text-[#949ba4]">Входящая заявка в друзья</div>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="respondFriend('${req.user_id}', 'accept')" class="bg-[#23a55a] hover:bg-[#1a7f44] text-white px-3 py-1.5 rounded text-xs font-bold">Принять</button>
+              <button onclick="respondFriend('${req.user_id}', 'reject')" class="bg-[#da373c] hover:bg-[#a1282c] text-white px-3 py-1.5 rounded text-xs font-bold">Отклонить</button>
+            </div>
+          `;
+          box.appendChild(item);
+        });
+        friendsData.outgoing.forEach(req => {
+          const item = document.createElement("div");
+          item.className = "flex items-center justify-between bg-[#2b2d31] p-3 rounded-lg opacity-75";
+          item.innerHTML = `
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background:${req.avatar_color}">${req.username.charAt(0).toUpperCase()}</div>
+              <div>
+                <div class="text-sm font-bold text-white">${escapeHtml(req.username)}</div>
+                <div class="text-xs text-[#949ba4]">Исходящая заявка отправлена...</div>
+              </div>
+            </div>
+          `;
+          box.appendChild(item);
+        });
+        return;
+      }
+
+      const list = currentFriendsTab === "online"
+        ? friendsData.friends.filter(f => f.online)
+        : friendsData.friends;
+
+      if (list.length === 0) {
+        box.innerHTML = `<div class="text-sm text-[#949ba4]">Список пуст. Нажми «Добавить в друзья» или кликни на любого участника справа!</div>`;
+        return;
+      }
+
+      list.forEach(f => {
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between bg-[#2b2d31] hover:bg-[#35373c] p-3 rounded-lg transition";
+        row.innerHTML = `
+          <div class="flex items-center gap-3 cursor-pointer" onclick="openDirectMessage('${f.user_id}', '${escapeHtml(f.username)}', '${f.avatar_color}')">
+            <div class="relative">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background:${f.avatar_color}">${f.username.charAt(0).toUpperCase()}</div>
+              <span class="absolute bottom-0 right-0 w-3 h-3 rounded-full ${f.online ? 'bg-[#23a55a]' : 'bg-[#80848e]'} ring-2 ring-[#2b2d31]"></span>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white">${escapeHtml(f.username)}</div>
+              <div class="text-xs text-[#949ba4]">${f.custom_status ? escapeHtml(f.custom_status) : (f.online ? 'В сети' : 'Не в сети')}</div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="openDirectMessage('${f.user_id}', '${escapeHtml(f.username)}', '${f.avatar_color}')" class="bg-[#1e1f22] hover:bg-[#5865F2] text-white px-3 py-1.5 rounded text-xs font-semibold">💬 Написать</button>
+            <button onclick="openDirectMessage('${f.user_id}', '${escapeHtml(f.username)}', '${f.avatar_color}'); startDirectCall(false);" class="bg-[#23a55a] hover:bg-[#1a7f44] text-white px-3 py-1.5 rounded text-xs font-semibold">📞 Позвонить</button>
+          </div>
+        `;
+        box.appendChild(row);
+      });
+    }
+
+    async function sendFriendRequest() {
+      const input = document.getElementById("friend-search-input");
+      const query = input.value.trim();
+      if (!query) return;
+      const res = await fetch("/api/friends/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_user_id: myUserId, target_query: query })
+      });
+      const data = await res.json();
+      const fb = document.getElementById("friend-req-feedback");
+      fb.textContent = data.ok ? data.message : data.error;
+      fb.className = data.ok ? "text-xs font-medium text-[#23a55a]" : "text-xs font-medium text-[#da373c]";
+      if (data.ok) input.value = "";
+      await loadFriends();
+    }
+
+    async function respondFriend(friendId, action) {
+      await fetch("/api/friends/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: myUserId, friend_id: friendId, action })
+      });
+      await loadFriends();
+    }
+
+    function renderDMList() {
+      const container = document.getElementById("dm-list-container");
+      container.innerHTML = `<div class="text-[11px] font-bold text-[#949ba4] uppercase tracking-wider px-2 mb-1">Личные сообщения</div>`;
+
+      const dmPartners = [...friendsData.friends];
+      allUsers.forEach(u => {
+        if (u.user_id !== myUserId && !dmPartners.some(f => f.user_id === u.user_id)) {
+          dmPartners.push(u);
+        }
+      });
+
+      dmPartners.forEach(u => {
+        const dmKey = makeDMKey(myUserId, u.user_id);
+        const active = (currentRoomKey === dmKey);
+        const item = document.createElement("div");
+        item.className = `flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer transition ${
+          active ? "bg-[#404249] text-white" : "text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]"
+        }`;
+        const color = u.avatar_color || u.color || "#5865F2";
+        item.innerHTML = `
+          <div class="relative shrink-0">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs" style="background:${color}">
+              ${u.username.charAt(0).toUpperCase()}
+            </div>
+            <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full ${u.online ? 'bg-[#23a55a]' : 'bg-[#80848e]'} ring-2 ring-[#2b2d31]"></span>
+          </div>
+          <div class="truncate">
+            <div class="text-sm font-medium truncate">${escapeHtml(u.username)}</div>
+            <div class="text-[10px] text-[#949ba4] truncate">${u.custom_status ? escapeHtml(u.custom_status) : ''}</div>
+          </div>
+        `;
+        item.onclick = () => openDirectMessage(u.user_id, u.username, color);
+        container.appendChild(item);
+      });
+    }
+
+    function makeDMKey(u1, u2) {
+      return "dm_" + [u1, u2].sort().join("_");
+    }
+
+    async function openDirectMessage(partnerId, partnerName, partnerColor) {
+      closeModals();
+      viewMode = "home";
+      currentDMPartner = { user_id: partnerId, username: partnerName, color: partnerColor };
+      currentRoomKey = makeDMKey(myUserId, partnerId);
+
+      document.getElementById("server-header").classList.add("hidden");
+      document.getElementById("dm-header").classList.remove("hidden");
+      document.getElementById("channels-container").classList.add("hidden");
+      document.getElementById("dm-list-container").classList.remove("hidden");
+      document.getElementById("friends-view").classList.add("hidden");
+      document.getElementById("chat-header").classList.remove("hidden");
+      document.getElementById("chat-view").classList.remove("hidden");
+
+      document.getElementById("chat-header-icon").textContent = "@";
+      document.getElementById("current-channel-name").textContent = partnerName;
+      document.getElementById("dm-call-actions").classList.remove("hidden");
+      document.getElementById("message-input").placeholder = `Написать @${partnerName} в ЛС...`;
+
+      renderDMList();
+      await loadRoomMessages(currentRoomKey);
+    }
+
+    // ==================== ТЕКСТОВЫЙ ЧАТ, MARKDOWN, ФАЙЛЫ, РЕАКЦИИ ====================
+    async function selectTextChannel(channelId, channelName) {
+      currentRoomKey = `ch_${channelId}`;
+      currentDMPartner = null;
+      document.getElementById("chat-header-icon").textContent = "#";
+      document.getElementById("current-channel-name").textContent = channelName;
+      document.getElementById("dm-call-actions").classList.add("hidden");
+      document.getElementById("message-input").placeholder = `Написать в #${channelName}...`;
+      renderChannels();
+      await loadRoomMessages(currentRoomKey);
+    }
+
+    async function loadRoomMessages(roomKey) {
+      const res = await fetch(`/api/messages/${encodeURIComponent(roomKey)}`);
+      const msgs = await res.json();
+      const list = document.getElementById("messages-list");
+      list.innerHTML = "";
+      msgs.forEach(appendMessage);
+    }
+
+    function renderMarkdown(text) {
+      let safe = escapeHtml(text);
+      safe = safe.replace(/```([\s\S]*?)```/g, '<pre class="bg-[#1e1f22] text-[#57F287] p-2 rounded my-1 text-xs font-mono overflow-x-auto">$1</pre>');
+      safe = safe.replace(/`([^`]+)`/g, '<code class="bg-[#1e1f22] text-[#eb459e] px-1.5 py-0.5 rounded text-xs font-mono">$1</code>');
+      safe = safe.replace(/\*\*([^*]+)\*\*/g, '<b class="text-white font-bold">$1</b>');
+      safe = safe.replace(/\*([^*]+)\*/g, '<i class="italic">$1</i>');
+      return safe.replace(/\n/g, "<br>");
+    }
+
+    function appendMessage(msg) {
+      const list = document.getElementById("messages-list");
+      const el = document.createElement("div");
+      el.id = `msg-row-${msg.id}`;
+      el.className = "group relative flex items-start gap-3 hover:bg-[#2e3035] -mx-4 px-4 py-1.5 rounded transition";
+
+      const isMine = (msg.sender_id === myUserId);
+
+      let replyHtml = "";
+      if (msg.reply_preview) {
+        replyHtml = `<div class="text-xs text-[#949ba4] flex items-center gap-1 mb-0.5 truncate">↩️ <span class="italic">${escapeHtml(msg.reply_preview)}</span></div>`;
+      }
+
+      let attachHtml = "";
+      if (msg.attachment) {
+        attachHtml = `<img src="${msg.attachment}" onclick="openLightbox(this.src)" class="mt-1.5 max-h-60 rounded-lg border border-[#1e1f22] cursor-zoom-in hover:opacity-95 transition" />`;
+      }
+
+      el.innerHTML = `
+        <div onclick="openUserPopover('${msg.sender_id}', '${escapeHtml(msg.username)}', '${msg.avatar_color}')"
+          class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shrink-0 mt-0.5 cursor-pointer hover:opacity-85" style="background:${msg.avatar_color}">
+          ${msg.username.charAt(0).toUpperCase()}
+        </div>
+        <div class="min-w-0 flex-1">
+          ${replyHtml}
+          <div class="flex items-baseline gap-2">
+            <span onclick="openUserPopover('${msg.sender_id}', '${escapeHtml(msg.username)}', '${msg.avatar_color}')" class="font-semibold text-white text-sm hover:underline cursor-pointer">${escapeHtml(msg.username)}</span>
+            <span class="text-[11px] text-[#949ba4]">${msg.timestamp}</span>
+          </div>
+          <div id="msg-content-${msg.id}" class="text-sm text-[#dbdee1] break-words msg-text">
+            ${renderMarkdown(msg.content)} ${msg.edited ? '<span class="text-[10px] text-[#949ba4]">(изм.)</span>' : ''}
+          </div>
+          ${attachHtml}
+          <div id="msg-reactions-${msg.id}" class="flex flex-wrap gap-1 mt-1"></div>
+        </div>
+
+        <!-- Всплывающая панель действий над сообщением -->
+        <div class="hidden group-hover:flex items-center gap-1 absolute right-4 -top-3 bg-[#313338] border border-[#26272d] rounded-md px-1.5 py-0.5 shadow-md">
+          <button onclick="toggleReaction(${msg.id}, '👍')" class="hover:scale-125 transition text-xs">👍</button>
+          <button onclick="toggleReaction(${msg.id}, '❤️')" class="hover:scale-125 transition text-xs">❤️</button>
+          <button onclick="toggleReaction(${msg.id}, '😂')" class="hover:scale-125 transition text-xs">😂</button>
+          <button onclick="toggleReaction(${msg.id}, '🔥')" class="hover:scale-125 transition text-xs">🔥</button>
+          <button onclick="toggleReaction(${msg.id}, '💀')" class="hover:scale-125 transition text-xs">💀</button>
+          <span class="text-[#4e5058]">|</span>
+          <button onclick="setReply(${msg.id}, '${escapeHtml(msg.username)}', '${escapeHtml(msg.content.substring(0, 45))}')" title="Ответить" class="text-xs text-[#b5bac1] hover:text-white px-1">↩️</button>
+          ${isMine ? `
+            <button onclick="promptEditMessage(${msg.id})" title="Изменить" class="text-xs text-[#b5bac1] hover:text-white px-1">✏️</button>
+            <button onclick="deleteMessage(${msg.id})" title="Удалить" class="text-xs text-[#da373c] hover:text-red-400 px-1">🗑️</button>
+          ` : ''}
+        </div>
+      `;
+      list.appendChild(el);
+      renderReactionsForMsg(msg.id, msg.reactions || {});
+      list.scrollTop = list.scrollHeight;
+    }
+
+    function renderReactionsForMsg(msgId, reactions) {
+      const box = document.getElementById(`msg-reactions-${msgId}`);
+      if (!box) return;
+      box.innerHTML = "";
+      for (const [emoji, users] of Object.entries(reactions)) {
+        if (!users || users.length === 0) continue;
+        const mine = users.includes(myUserId);
+        const btn = document.createElement("button");
+        btn.onclick = () => toggleReaction(msgId, emoji);
+        btn.className = `px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border transition ${
+          mine ? "bg-[#3c4270] border-[#5865F2] text-white" : "bg-[#2b2d31] border-transparent text-[#b5bac1] hover:border-[#4e5058]"
+        }`;
+        btn.innerHTML = `<span>${emoji}</span><span class="font-bold">${users.length}</span>`;
+        box.appendChild(btn);
+      }
+    }
+
+    function toggleReaction(msgId, emoji) {
+      if (ws) ws.send(JSON.stringify({ type: "toggle_reaction", message_id: msgId, emoji }));
+    }
+
+    function setReply(msgId, username, preview) {
+      replyToMessage = { id: msgId, preview: `${username}: ${preview}` };
+      document.getElementById("reply-target-user").textContent = username;
+      document.getElementById("reply-target-text").textContent = preview;
+      document.getElementById("reply-banner").classList.remove("hidden");
+      document.getElementById("message-input").focus();
+    }
+
+    function cancelReply() {
+      replyToMessage = null;
+      document.getElementById("reply-banner").classList.add("hidden");
+    }
+
+    function promptEditMessage(msgId) {
+      const next = prompt("Изменить сообщение:");
+      if (next && next.trim() && ws) {
+        ws.send(JSON.stringify({ type: "edit_message", message_id: msgId, content: next.trim() }));
+      }
+    }
+
+    function deleteMessage(msgId) {
+      if (ws) ws.send(JSON.stringify({ type: "delete_message", message_id: msgId }));
+    }
+
+    function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingAttachment = reader.result;
+        document.getElementById("attachment-preview").src = pendingAttachment;
+        document.getElementById("attachment-banner").classList.remove("hidden");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearAttachment() {
+      pendingAttachment = null;
+      document.getElementById("file-input").value = "";
+      document.getElementById("attachment-banner").classList.add("hidden");
+    }
+
+    function openLightbox(src) {
+      document.getElementById("lightbox-img").src = src;
+      document.getElementById("lightbox-modal").classList.remove("hidden");
+    }
+
+    document.getElementById("chat-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("message-input");
+      const text = input.value.trim();
+      if ((!text && !pendingAttachment) || !currentRoomKey || !ws) return;
+
+      ws.send(JSON.stringify({
+        type: "chat_message",
+        room_key: currentRoomKey,
+        content: text,
+        attachment: pendingAttachment,
+        reply_to_id: replyToMessage ? replyToMessage.id : null,
+        reply_preview: replyToMessage ? replyToMessage.preview : null
+      }));
+
+      input.value = "";
+      cancelReply();
+      clearAttachment();
+    });
+
+    document.getElementById("message-input").addEventListener("input", () => {
+      if (ws && currentRoomKey) {
+        ws.send(JSON.stringify({ type: "typing", room_key: currentRoomKey }));
+      }
+    });
+
+    function showTyping(username) {
+      const el = document.getElementById("typing-indicator");
+      el.textContent = `${username} печатает...`;
+      clearTimeout(typingTimeout);
+      typingTimeout = setTimeout(() => { el.textContent = ""; }, 2000);
+    }
+
+    // ==================== СПИСОК УЧАСТНИКОВ СПРАВА И МИНИ-ПРОФИЛЬ ====================
+    function renderOnlineUsers(users) {
+      const online = users.filter(u => u.online);
+      document.getElementById("online-count").textContent = `В сети — ${online.length}`;
+      const list = document.getElementById("online-users-list");
+      list.innerHTML = "";
+
+      const statusColors = { online: "#23a55a", idle: "#f0b232", dnd: "#f23f43", offline: "#80848e" };
+
+      users.forEach(u => {
+        const row = document.createElement("div");
+        row.className = `flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-[#35373c] cursor-pointer ${u.online ? '' : 'opacity-50'}`;
+        row.onclick = () => openUserPopover(u.user_id, u.username, u.color, u.custom_status);
+        row.innerHTML = `
+          <div class="relative shrink-0">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm" style="background:${u.color}">
+              ${u.username.charAt(0).toUpperCase()}
+            </div>
+            <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full ring-2 ring-[#2b2d31]" style="background:${statusColors[u.status] || '#80848e'}"></span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-medium text-[#dbdee1] truncate">${escapeHtml(u.username)}</div>
+            <div class="text-[10px] text-[#949ba4] truncate">${escapeHtml(u.custom_status || '')}</div>
+          </div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    function openUserPopover(userId, username, color, customStatus = "") {
+      if (userId === "system_bot") return;
+      document.getElementById("popover-banner").style.backgroundColor = color;
+      const av = document.getElementById("popover-avatar");
+      av.style.backgroundColor = color;
+      av.textContent = username.charAt(0).toUpperCase();
+      document.getElementById("popover-username").textContent = username;
+      document.getElementById("popover-userid").textContent = `ID: ${userId}`;
+      document.getElementById("popover-custom").textContent = customStatus || "";
+
+      document.getElementById("popover-dm-btn").onclick = () => openDirectMessage(userId, username, color);
+      document.getElementById("popover-friend-btn").onclick = async () => {
+        await fetch("/api/friends/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from_user_id: myUserId, target_query: userId })
+        });
+        alert(`Заявка в друзья отправлена ${username}!`);
+        closeModals();
+        await loadFriends();
+      };
+      document.getElementById("popover-call-btn").onclick = () => {
+        openDirectMessage(userId, username, color);
+        startDirectCall(false);
+      };
+
+      document.getElementById("user-popover-modal").classList.remove("hidden");
+    }
+
+    // ==================== ЗВОНКИ ДРУГУ В ЛС + ГОЛОС + КАМЕРА + СТРИМ ЭКРАНА ====================
+    async function startDirectCall(withVideo) {
+      if (!currentDMPartner) return;
+      const callRoomId = makeDMKey(myUserId, currentDMPartner.user_id);
+      await joinVoiceRoom(callRoomId, `Звонок: ${currentDMPartner.username}`);
+      if (withVideo && !isWebcamOn) await toggleWebcam();
+
+      ws.send(JSON.stringify({
+        type: "call_user",
+        target_id: currentDMPartner.user_id,
+        room_id: callRoomId,
+        with_video: withVideo
+      }));
+    }
+
+    function handleIncomingCall(data) {
+      incomingCallData = data;
+      const av = document.getElementById("caller-avatar");
+      av.textContent = data.caller_name.charAt(0).toUpperCase();
+      av.style.backgroundColor = data.caller_color;
+      document.getElementById("caller-name").textContent = data.caller_name;
+      document.getElementById("caller-type-text").textContent = data.with_video ? "🎥 Входящий видеозвонок..." : "📞 Входящий голосовой вызов...";
+      document.getElementById("incoming-call-modal").classList.remove("hidden");
+      startRingtone();
+    }
+
+    async function respondToCall(accepted) {
+      stopRingtone();
+      document.getElementById("incoming-call-modal").classList.add("hidden");
+      if (!incomingCallData) return;
+
+      ws.send(JSON.stringify({
+        type: "call_response",
+        caller_id: incomingCallData.caller_id,
+        accepted,
+        room_id: incomingCallData.room_id
+      }));
+
+      if (accepted) {
+        await openDirectMessage(incomingCallData.caller_id, incomingCallData.caller_name, incomingCallData.caller_color);
+        await joinVoiceRoom(incomingCallData.room_id, `Звонок: ${incomingCallData.caller_name}`);
+        if (incomingCallData.with_video && !isWebcamOn) await toggleWebcam();
+      }
+      incomingCallData = null;
+    }
+
+    async function joinVoiceRoom(roomId, roomLabel) {
+      if (currentVoiceRoomId === roomId) return;
+      const noiseSupp = document.getElementById("noise-suppression-toggle").checked;
+      try {
+        if (!localAudioStream) {
+          localAudioStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: noiseSupp, noiseSuppression: noiseSupp, autoGainControl: true },
+            video: false
+          });
+        }
+      } catch (e) {
+        alert("Разреши доступ к микрофону в браузере для голосовой связи!");
+        return;
+      }
+
+      closeAllPeers();
+      currentVoiceRoomId = roomId;
+      document.getElementById("voice-status-bar").classList.remove("hidden");
+      document.getElementById("voice-channel-label").textContent = roomLabel;
+
+      updateMicTrackState();
+      sfxJoinVoice();
+      ws.send(JSON.stringify({ type: "join_voice", room_id: roomId }));
+    }
+
+    function leaveVoice() {
+      if (!currentVoiceRoomId) return;
+      currentVoiceRoomId = null;
+      isWebcamOn = false;
+      isScreenOn = false;
+      if (localVideoStream) {
+        localVideoStream.getTracks().forEach(t => t.stop());
+        localVideoStream = null;
+      }
+      document.getElementById("voice-status-bar").classList.add("hidden");
+      document.getElementById("video-stage").classList.add("hidden");
+      document.getElementById("video-grid").innerHTML = "";
+      closeAllPeers();
+      sfxLeaveVoice();
+      if (ws) ws.send(JSON.stringify({ type: "leave_voice" }));
+    }
+
+    // ==================== PUSH-TO-TALK (РАЦИЯ) И УПРАВЛЕНИЕ МИКРОФОНОМ ====================
+    function updateMicTrackState() {
+      if (!localAudioStream) return;
+      const shouldEnable = !isMuted && !isDeafened && (voiceMode === "vad" || isPTTPressed);
+      localAudioStream.getAudioTracks().forEach(t => { t.enabled = shouldEnable; });
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      updateMicTrackState();
+      document.getElementById("mute-btn").textContent = isMuted ? "🔇" : "🎙️";
+      sendMediaState();
+    }
+
+    function toggleDeafen() {
+      isDeafened = !isDeafened;
+      updateMicTrackState();
+      document.querySelectorAll("#remote-audios audio").forEach(a => { a.muted = isDeafened; });
+      document.getElementById("deafen-btn").textContent = isDeafened ? "🙉" : "🎧";
+      sendMediaState();
+    }
+
+    function sendMediaState() {
+      if (ws && currentVoiceRoomId) {
+        ws.send(JSON.stringify({
+          type: "voice_media_state",
+          muted: isMuted,
+          deafened: isDeafened,
+          video: isWebcamOn,
+          screen: isScreenOn
+        }));
+      }
+    }
+
+    function setVoiceMode(mode) {
+      voiceMode = mode;
+      localStorage.setItem("dc_voice_mode", mode);
+      applyVoiceModeUI();
+      updateMicTrackState();
+    }
+
+    function applyVoiceModeUI() {
+      document.getElementById("vmode-vad").style.borderColor = (voiceMode === "vad") ? "#5865F2" : "transparent";
+      document.getElementById("vmode-ptt").style.borderColor = (voiceMode === "ptt") ? "#5865F2" : "transparent";
+      document.getElementById("ptt-banner").classList.toggle("hidden", voiceMode !== "ptt");
+      document.getElementById("ptt-key-label").textContent = pttKeyCode;
+      document.getElementById("ptt-bind-btn").textContent = pttKeyCode;
+      document.getElementById("hotkey-ptt-display").textContent = pttKeyCode;
+    }
+
+    function startBindingPTT() {
+      isBindingPTT = true;
+      document.getElementById("ptt-bind-btn").textContent = "Нажми любую клавишу...";
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeModals();
+
+      if (isBindingPTT) {
+        e.preventDefault();
+        pttKeyCode = e.code;
+        localStorage.setItem("dc_ptt_key", pttKeyCode);
+        isBindingPTT = false;
+        applyVoiceModeUI();
+        return;
+      }
+
+      if (e.altKey && e.code === "KeyM") {
+        e.preventDefault();
+        toggleMute();
+        return;
+      }
+
+      // Не срабатываем, если пользователь печатает текст в поле ввода
+      const activeTag = document.activeElement ? document.activeElement.tagName : "";
+      if (activeTag === "INPUT" || activeTag === "TEXTAREA") return;
+
+      if (voiceMode === "ptt" && e.code === pttKeyCode && !isPTTPressed) {
+        isPTTPressed = true;
+        document.getElementById("ptt-active-dot").className = "w-2.5 h-2.5 rounded-full bg-[#23a55a] animate-ping";
+        sfxPTTOn();
+        updateMicTrackState();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (voiceMode === "ptt" && e.code === pttKeyCode && isPTTPressed) {
+        isPTTPressed = false;
+        document.getElementById("ptt-active-dot").className = "w-2.5 h-2.5 rounded-full bg-[#80848e]";
+        sfxPTTOff();
+        updateMicTrackState();
+      }
+    });
+
+    // ==================== ВЕБ-КАМЕРА И ДЕМОНСТРАЦИЯ ЭКРАНА ====================
+    async function toggleWebcam() {
+      if (!currentVoiceRoomId) {
+        alert("Сначала подключись к голосовому каналу или звонку!");
+        return;
+      }
+      if (isWebcamOn) {
+        stopLocalVideo();
+        return;
+      }
+      try {
+        localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        isWebcamOn = true;
+        isScreenOn = false;
+        await attachVideoTrackToPeers(localVideoStream.getVideoTracks()[0]);
+        renderVideoTile("local", `${myUsername} (Камера)`, localVideoStream);
+        sendMediaState();
+      } catch (e) {
+        alert("Не удалось включить веб-камеру.");
+      }
+    }
+
+    async function toggleScreenShare() {
+      if (!currentVoiceRoomId) {
+        alert("Сначала подключись к голосовому каналу или звонку!");
+        return;
+      }
+      if (isScreenOn) {
+        stopLocalVideo();
+        return;
+      }
+      try {
+        localVideoStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        isScreenOn = true;
+        isWebcamOn = false;
+        const videoTrack = localVideoStream.getVideoTracks()[0];
+        videoTrack.onended = () => stopLocalVideo();
+        await attachVideoTrackToPeers(videoTrack);
+        renderVideoTile("local", `${myUsername} (Экран 🖥️)`, localVideoStream);
+        sendMediaState();
+      } catch (e) {}
+    }
+
+    function stopLocalVideo() {
+      if (localVideoStream) {
+        localVideoStream.getTracks().forEach(t => t.stop());
+        localVideoStream = null;
+      }
+      isWebcamOn = false;
+      isScreenOn = false;
+      const tile = document.getElementById("vtile_local");
+      if (tile) tile.remove();
+      sendMediaState();
+    }
+
+    async function attachVideoTrackToPeers(videoTrack) {
+      for (const [peerId, pc] of Object.entries(peerConnections)) {
+        const sender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (sender) {
+          await sender.replaceTrack(videoTrack);
+        } else {
+          pc.addTrack(videoTrack, localVideoStream);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          ws.send(JSON.stringify({ type: "webrtc_offer", target_id: peerId, sdp: offer }));
+        }
+      }
+    }
+
+    function renderVideoTile(id, label, stream) {
+      document.getElementById("video-stage").classList.remove("hidden");
+      let tile = document.getElementById(`vtile_${id}`);
+      if (!tile) {
+        tile = document.createElement("div");
+        tile.id = `vtile_${id}`;
+        tile.className = "relative bg-black rounded-lg overflow-hidden border border-[#2b2d31] aspect-video cursor-pointer";
+        tile.innerHTML = `
+          <video id="vvid_${id}" autoplay playsinline ${id === 'local' ? 'muted' : ''} class="w-full h-full object-contain"></video>
+          <div class="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">${escapeHtml(label)}</div>
+        `;
+        tile.onclick = () => {
+          const v = document.getElementById(`vvid_${id}`);
+          if (v && v.requestFullscreen) v.requestFullscreen();
+        };
+        document.getElementById("video-grid").appendChild(tile);
+      }
+      const vid = document.getElementById(`vvid_${id}`);
+      if (vid) vid.srcObject = stream;
+    }
+
+    // ==================== WEBRTC PEER CONNECTIONS ====================
+    function createPeerConnection(peerId) {
+      if (peerConnections[peerId]) return peerConnections[peerId];
+      const pc = new RTCPeerConnection(rtcConfig);
+      peerConnections[peerId] = pc;
+
+      if (localAudioStream) {
+        localAudioStream.getTracks().forEach(track => pc.addTrack(track, localAudioStream));
+      }
+      if (localVideoStream) {
+        localVideoStream.getTracks().forEach(track => pc.addTrack(track, localVideoStream));
+      }
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate && ws) {
+          ws.send(JSON.stringify({ type: "webrtc_ice", target_id: peerId, candidate: e.candidate }));
+        }
+      };
+
+      pc.ontrack = (e) => {
+        const stream = e.streams[0];
+        if (e.track.kind === "video") {
+          const peerUser = allUsers.find(u => u.user_id === peerId);
+          renderVideoTile(peerId, peerUser ? peerUser.username : "Стрим участника", stream);
+        } else {
+          let audio = document.getElementById("audio_" + peerId);
+          if (!audio) {
+            audio = document.createElement("audio");
+            audio.id = "audio_" + peerId;
+            audio.autoplay = true;
+            audio.volume = remoteVolume;
+            audio.muted = isDeafened;
+            document.getElementById("remote-audios").appendChild(audio);
+          }
+          audio.srcObject = stream;
+        }
+      };
+      return pc;
+    }
+
+    async function createOffer(peerId) {
+      const pc = createPeerConnection(peerId);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: "webrtc_offer", target_id: peerId, sdp: offer }));
+    }
+
+    async function handleOffer(peerId, sdp) {
+      const pc = createPeerConnection(peerId);
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify({ type: "webrtc_answer", target_id: peerId, sdp: answer }));
+    }
+
+    async function handleAnswer(peerId, sdp) {
+      const pc = peerConnections[peerId];
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    }
+
+    async function handleIce(peerId, candidate) {
+      const pc = peerConnections[peerId];
+      if (pc && candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+
+    function closePeer(peerId) {
+      if (peerConnections[peerId]) {
+        peerConnections[peerId].close();
+        delete peerConnections[peerId];
+      }
+      const audio = document.getElementById("audio_" + peerId);
+      if (audio) audio.remove();
+      const tile = document.getElementById("vtile_" + peerId);
+      if (tile) tile.remove();
+    }
+
+    function closeAllPeers() {
+      Object.keys(peerConnections).forEach(closePeer);
+    }
+
+    // ==================== НАСТРОЙКИ И МОДАЛКИ ====================
+    function openSettingsModal() {
+      document.getElementById("profile-username").value = myUsername;
+      document.getElementById("profile-color").value = myColor;
+      document.getElementById("profile-status").value = myStatus;
+      document.getElementById("profile-custom-status").value = myCustomStatus;
+      document.getElementById("settings-modal").classList.remove("hidden");
+    }
+
+    function switchSettingsTab(tab) {
+      ["account", "voice", "appearance", "hotkeys"].forEach(t => {
+        document.getElementById(`scontent-${t}`).classList.toggle("hidden", t !== tab);
+        document.getElementById(`stab-${t}`).className = (t === tab)
+          ? "w-full text-left px-3 py-1.5 rounded text-sm font-medium bg-[#404249] text-white"
+          : "w-full text-left px-3 py-1.5 rounded text-sm font-medium text-[#b5bac1] hover:bg-[#35373c]";
+      });
+    }
+
+    async function populateAudioDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const select = document.getElementById("audio-input-select");
+        select.innerHTML = "";
+        devices.filter(d => d.kind === "audioinput").forEach((d, idx) => {
+          const opt = document.createElement("option");
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Микрофон #${idx + 1}`;
+          select.appendChild(opt);
+        });
+      } catch (e) {}
+    }
+
+    function updateRemoteVolume(val) {
+      remoteVolume = Number(val) / 100;
+      document.querySelectorAll("#remote-audios audio").forEach(a => { a.volume = remoteVolume; });
+    }
+
+    async function testMicLevel() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = new AudioContext();
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        src.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const bar = document.getElementById("mic-level-bar");
+        let ticks = 0;
+        const timer = setInterval(() => {
+          analyser.getByteFrequencyData(data);
+          const avg = data.reduce((a, b) => a + b, 0) / data.length;
+          bar.style.width = Math.min(100, avg * 2.2) + "%";
+          ticks++;
+          if (ticks > 60) {
+            clearInterval(timer);
+            bar.style.width = "0%";
+            stream.getTracks().forEach(t => t.stop());
+          }
+        }, 50);
+      } catch (e) {
+        alert("Доступ к микрофону не предоставлен.");
+      }
+    }
+
+    function setTheme(theme) {
+      document.body.classList.remove("theme-oled", "theme-cyber");
+      if (theme === "oled") document.body.classList.add("theme-oled");
+      if (theme === "cyber") document.body.classList.add("theme-cyber");
+    }
+
+    function saveProfile() {
+      const name = document.getElementById("profile-username").value.trim();
+      const color = document.getElementById("profile-color").value;
+      const status = document.getElementById("profile-status").value;
+      const custom = document.getElementById("profile-custom-status").value.trim();
+      if (!name) return;
+
+      myUsername = name;
+      myColor = color;
+      myStatus = status;
+      myCustomStatus = custom;
+
+      localStorage.setItem("dc_username", myUsername);
+      localStorage.setItem("dc_color", myColor);
+      localStorage.setItem("dc_status", myStatus);
+      localStorage.setItem("dc_custom_status", myCustomStatus);
+
+      updateMyProfileUI();
+      if (ws) {
+        ws.send(JSON.stringify({
+          type: "update_profile",
+          username: myUsername,
+          color: myColor,
+          status: myStatus,
+          custom_status: myCustomStatus
+        }));
+      }
+      closeModals();
+    }
+
+    function openServerModal() { document.getElementById("server-modal").classList.remove("hidden"); }
+    function openChannelModal() { document.getElementById("channel-modal").classList.remove("hidden"); }
+    function closeModals() {
+      ["server-modal", "channel-modal", "settings-modal", "user-popover-modal"].forEach(id => {
+        document.getElementById(id).classList.add("hidden");
+      });
+    }
+
+    async function submitNewServer() {
+      const name = document.getElementById("new-server-name").value.trim();
+      const icon = document.getElementById("new-server-icon").value.trim() || "🚀";
+      if (!name) return;
+      await fetch("/api/servers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, icon })
+      });
+      document.getElementById("new-server-name").value = "";
+      closeModals();
+    }
+
+    async function submitNewChannel() {
+      const name = document.getElementById("new-channel-name").value.trim();
+      const type = document.getElementById("new-channel-type").value;
+      if (!name || !currentServerId) return;
+      await fetch("/api/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ server_id: currentServerId, name, type })
+      });
+      document.getElementById("new-channel-name").value = "";
+      closeModals();
+    }
+
+    function escapeHtml(str) {
+      return String(str || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
+    }
+
+    initApp();
+  </script>
+</body>
+</html>
